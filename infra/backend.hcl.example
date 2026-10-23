@@ -1,0 +1,4 @@
+# backend.hcl にコピーして値を変更する（tfstate を置く既存の S3 バケット）
+bucket = "your-tfstate-bucket"
+key    = "soundcloud-likes-dl/terraform.tfstate"
+region = "ap-northeast-1"

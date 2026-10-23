@@ -1,0 +1,23 @@
+[project]
+name = "sc-likes-dl"
+version = "0.1.0"
+description = "SoundCloud の Likes からダウンロード可能なトラックを MP3 で保存する"
+requires-python = ">=3.12"
+dependencies = [
+    "httpx>=0.27",
+    "mutagen>=1.47",
+    "boto3>=1.34",
+    "fastapi>=0.161.1",
+    "uvicorn>=0.54.0",
+]
+
+[project.scripts]
+sc-likes-dl = "sc_dl.main:main"
+sc-likes-web = "sc_dl.web:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["sc_dl"]

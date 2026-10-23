@@ -1,0 +1,6 @@
+# terraform.tfvars にコピーして値を変更する
+region      = "ap-northeast-1"
+name_prefix = "your-name"
+
+# SoundCloud のユーザー ID（README の「SoundCloud のユーザー ID を調べる」を参照）
+allowed_user_ids = [123456789]

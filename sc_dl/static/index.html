@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SoundCloud Likes DL</title>
+<style>
+  :root {
+    --bg: #f7f7f8; --surface: #fff; --text: #1d1d1f; --muted: #6e6e73;
+    --border: #e3e3e6; --accent: #ff5500; --accent-text: #fff;
+    --ok: #1a7f37; --ng: #cf222e;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #161618; --surface: #1f1f22; --text: #f2f2f4; --muted: #a0a0a8;
+      --border: #333338; --ok: #4ac26b; --ng: #ff6b6b;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Hiragino Sans", sans-serif; }
+  header { position: sticky; top: 0; z-index: 1; background: var(--surface);
+           border-bottom: 1px solid var(--border); padding: 12px 16px; }
+  .bar { max-width: 960px; margin: 0 auto; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  h1 { font-size: 16px; margin: 0 12px 0 0; }
+  main { max-width: 960px; margin: 0 auto; padding: 16px; }
+  button { font: inherit; border: 1px solid var(--border); background: var(--surface); color: var(--text);
+           border-radius: 6px; padding: 6px 12px; cursor: pointer; white-space: nowrap; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
+  button:disabled { opacity: .5; cursor: default; }
+  input[type=search] { font: inherit; flex: 1; min-width: 160px; padding: 6px 10px; border-radius: 6px;
+                       border: 1px solid var(--border); background: var(--bg); color: var(--text); }
+  #summary { color: var(--muted); margin-bottom: 12px; min-height: 21px; }
+  #auth { background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+          padding: 4px 16px 16px; margin-bottom: 16px; }
+  #auth ol { padding-left: 20px; }
+  #auth li { display: list-item; background: none; border: 0; padding: 2px 0; margin: 0; }
+  #auth .hint { color: var(--muted); font-size: 13px; }
+  #auth .row { display: flex; gap: 8px; flex-wrap: wrap; }
+  #auth input { font: inherit; flex: 1; min-width: 160px; padding: 6px 10px; border-radius: 6px;
+                border: 1px solid var(--border); background: var(--bg); color: var(--text); }
+  a.bm { display: inline-block; padding: 2px 10px; border-radius: 6px; background: var(--accent);
+         color: var(--accent-text); text-decoration: none; font-weight: 600; cursor: grab; }
+  ul { list-style: none; margin: 0; padding: 0; }
+  li { display: flex; align-items: center; gap: 12px; padding: 8px; border-radius: 8px;
+       background: var(--surface); border: 1px solid var(--border); margin-bottom: 6px; }
+  li img { width: 48px; height: 48px; border-radius: 4px; object-fit: cover; flex: none; background: var(--border); }
+  .meta { flex: 1; min-width: 0; }
+  .title { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .title a { color: inherit; text-decoration: none; }
+  .artist { color: var(--muted); font-size: 13px; }
+  .status { font-size: 12px; min-width: 56px; text-align: right; color: var(--muted); }
+  .status.ok { color: var(--ok); } .status.ng { color: var(--ng); }
+</style>
+</head>
+<body>
+<header>
+  <div class="bar">
+    <h1>SoundCloud Likes DL</h1>
+    <button id="load" class="primary">再読み込み</button>
+    <input id="filter" type="search" placeholder="タイトル・作者で絞り込み" disabled>
+    <button id="all" disabled title="一覧の取得が終わると押せます">表示中をすべてDL</button>
+    <button id="auth-toggle">トークン設定</button>
+  </div>
+</header>
+<main>
+  <section id="auth" hidden>
+    <p id="auth-msg"></p>
+    <ol>
+      <li>このリンクをブックマークバーへドラッグ: <a id="bookmarklet" class="bm">SC トークン取得</a></li>
+      <li>ログイン済みの <a href="https://soundcloud.com/" target="_blank" rel="noopener">soundcloud.com</a> を開き、ブックマークをクリック</li>
+      <li>このページがトークン付きで開き、自動で一覧を取得します（期限が切れたら同じ操作をするだけ）</li>
+    </ol>
+    <p class="hint">うまくいかない場合は、soundcloud.com の DevTools → Application → Cookies の <code>oauth_token</code> を貼り付け:</p>
+    <div class="row">
+      <input id="token-input" type="password" placeholder="oauth_token" autocomplete="off">
+      <button id="token-save" class="primary">保存</button>
+      <button id="token-clear">保存済みを削除</button>
+    </div>
+  </section>
+  <div id="summary"></div>
+  <ul id="list"></ul>
+</main>
+<script>
+const $ = (s) => document.querySelector(s);
+let rows = [];  // { track, li }
+
+// ---- SoundCloud トークン（ブラウザの localStorage にだけ保存し、API 呼び出し時にヘッダーで送る）----
+const TOKEN_KEY = "sc_oauth_token";
+const store = {
+  get() { try { return localStorage.getItem(TOKEN_KEY); } catch { return null; } },
+  set(v) { try { v ? localStorage.setItem(TOKEN_KEY, v) : localStorage.removeItem(TOKEN_KEY); } catch {} },
+};
+
+// ブックマークレットから #sc_token=... 付きで開かれたら保存して URL から消す
+const hashToken = new URLSearchParams(location.hash.slice(1)).get("sc_token");
+if (hashToken) {
+  store.set(hashToken);
+  history.replaceState(null, "", location.pathname + location.search);
+}
+
+// soundcloud.com 上で実行すると Cookie の oauth_token を読み、このページに渡して開く
+const appUrl = location.origin + location.pathname;
+$("#bookmarklet").href = "javascript:" + encodeURIComponent(`(()=>{
+  const m = document.cookie.match(/(?:^|;\\s*)oauth_token=([^;]+)/);
+  if (!m) { alert("oauth_token を読み取れませんでした。soundcloud.com にログインした状態で、soundcloud.com のページ上で実行してください。"); return; }
+  window.open(${JSON.stringify(appUrl)} + "#sc_token=" + encodeURIComponent(decodeURIComponent(m[1])));
+})()`);
+
+$("#auth-toggle").onclick = () => { $("#auth").hidden = !$("#auth").hidden; };
+$("#token-save").onclick = () => {
+  store.set($("#token-input").value.trim());
+  $("#token-input").value = "";
+  $("#auth").hidden = true;
+  $("#load").click();
+};
+$("#token-clear").onclick = () => { store.set(null); $("#auth-msg").textContent = "保存済みのトークンを削除しました。"; };
+
+async function api(path, opts = {}) {
+  const token = store.get();
+  const r = await fetch(path, { ...opts, headers: { ...(opts.headers || {}), ...(token ? { "X-SC-Token": token } : {}) } });
+  if (r.status === 401) {
+    $("#auth").hidden = false;
+    $("#auth-msg").textContent = "トークンが未設定か期限切れです。下の手順で設定してください。";
+  }
+  if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || `HTTP ${r.status}`);
+  return r.json();
+}
+
+// 1ページ（200件）ずつ取得し、届いた順に一覧へ追記する
+$("#load").onclick = async () => {
+  $("#load").disabled = $("#all").disabled = true;
+  $("#filter").disabled = false;
+  $("#list").replaceChildren();
+  rows = [];
+  let likes = 0, purchase = 0, cursor = null;
+  const summary = (suffix) => {
+    $("#summary").textContent =
+      `Likes ${likes} 件 / DL可能 ${rows.length} 件（purchase のみ ${purchase} 件・その他 ${likes - rows.length - purchase} 件は除外）${suffix}`;
+  };
+  try {
+    do {
+      summary(" … 取得中");
+      const d = await api("api/tracks" + (cursor ? `?cursor=${encodeURIComponent(cursor)}` : ""));
+      likes += d.likes; purchase += d.purchase_only; cursor = d.next_cursor;
+      d.tracks.forEach(append);
+    } while (cursor);
+    summary("");
+  } catch (e) {
+    if (likes) summary(` … 取得に失敗しました: ${e.message}`);
+    else $("#summary").textContent = `取得に失敗しました: ${e.message}`;
+  } finally {
+    $("#load").disabled = $("#all").disabled = false;
+  }
+};
+
+$("#filter").oninput = () => rows.forEach(({ track, li }) => { li.hidden = !matches(track); });
+
+function matches(t) {
+  const q = $("#filter").value.trim().toLowerCase();
+  return !q || `${t.title} ${t.artist}`.toLowerCase().includes(q);
+}
+
+function append(t) {
+  const li = document.createElement("li");
+  li.innerHTML = `
+    <img loading="lazy" alt="">
+    <div class="meta"><div class="title"><a target="_blank" rel="noopener"></a></div><div class="artist"></div></div>
+    <span class="status"></span>
+    <button>DL</button>`;
+  if (t.artwork_url) li.querySelector("img").src = t.artwork_url;
+  const a = li.querySelector("a");
+  a.textContent = t.title; a.href = t.permalink_url;
+  li.querySelector(".artist").textContent = t.artist;
+  li.querySelector("button").onclick = () => download(t, li);
+  li.hidden = !matches(t);
+  rows.push({ track: t, li });
+  $("#list").append(li);
+}
+
+async function download(t, li) {
+  const btn = li.querySelector("button"), st = li.querySelector(".status");
+  btn.disabled = true; st.className = "status"; st.textContent = "変換中…";
+  try {
+    const { url, filename } = await api(`api/tracks/${t.id}/download`, { method: "POST" });
+    const a = Object.assign(document.createElement("a"), { href: url, download: filename });
+    document.body.append(a); a.click(); a.remove();
+    st.className = "status ok"; st.textContent = "完了";
+  } catch (e) {
+    st.className = "status ng"; st.textContent = "失敗"; st.title = e.message;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+$("#all").onclick = async () => {
+  $("#all").disabled = true;
+  // SoundCloud への負荷を抑えるため1曲ずつ順番に処理する
+  for (const { track, li } of rows.filter(r => !r.li.hidden)) {
+    await download(track, li);
+  }
+  $("#all").disabled = false;
+};
+
+// アクセスしたら自動で一覧を取得する
+$("#load").click();
+</script>
+</body>
+</html>

@@ -1,0 +1,12 @@
+.env
+.venv/
+downloads/
+__pycache__/
+.terraform/
+*.tfstate
+*.tfstate.backup
+infra/terraform.tfvars
+infra/backend.hcl
+*.tfplan
+# グローバル gitignore で除外されているが、provider のバージョン固定のためコミットする
+!infra/.terraform.lock.hcl
